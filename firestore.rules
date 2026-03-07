@@ -1,0 +1,142 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    
+    function isStudent() {
+      return isSignedIn() && getUserRole() == 'student';
+    }
+    
+    function isRecruiter() {
+      return isSignedIn() && getUserRole() == 'recruiter';
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && getUserRole() == 'admin';
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Students collection
+    match /students/{studentId} {
+      allow read: if isSignedIn();
+      // Allow creation if the user is the owner (during signup, we can't check role yet)
+      allow create: if isOwner(studentId);
+      allow update: if isOwner(studentId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Recruiters collection
+    match /recruiters/{recruiterId} {
+      allow read: if isSignedIn();
+      // Allow creation if the user is the owner (during signup, we can't check role yet)
+      allow create: if isOwner(recruiterId);
+      allow update: if isOwner(recruiterId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Jobs collection
+    match /jobs/{jobId} {
+      allow read: if isSignedIn();
+      allow create: if isRecruiter();
+      allow update: if isRecruiter() && 
+                     resource.data.recruiterId == request.auth.uid;
+      allow delete: if (isRecruiter() && resource.data.recruiterId == request.auth.uid) 
+                    || isAdmin();
+    }
+
+    // Applications collection
+    match /applications/{applicationId} {
+      allow read: if isSignedIn() && (
+        // Student can read their own applications
+        (isStudent() && resource.data.studentId == request.auth.uid) ||
+        // Recruiter can read applications for their jobs
+        (isRecruiter() && get(/databases/$(database)/documents/jobs/$(resource.data.jobId)).data.recruiterId == request.auth.uid) ||
+        // Admin can read all
+        isAdmin()
+      );
+      
+      allow create: if isStudent() && 
+                     request.resource.data.studentId == request.auth.uid;
+      
+      allow update: if (isStudent() && resource.data.studentId == request.auth.uid) ||
+                     (isRecruiter() && get(/databases/$(database)/documents/jobs/$(resource.data.jobId)).data.recruiterId == request.auth.uid) ||
+                     isAdmin();
+      
+      allow delete: if isAdmin();
+    }
+
+    // Interviews collection
+    match /interviews/{interviewId} {
+      allow read: if isSignedIn() && (
+        (isStudent() && resource.data.studentId == request.auth.uid) ||
+        (isRecruiter() && resource.data.recruiterId == request.auth.uid) ||
+        isAdmin()
+      );
+      
+      allow create: if isRecruiter();
+      
+      allow update: if (isRecruiter() && resource.data.recruiterId == request.auth.uid) ||
+                     isAdmin();
+      
+      allow delete: if (isRecruiter() && resource.data.recruiterId == request.auth.uid) ||
+                     isAdmin();
+    }
+
+    // Notifications collection
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Reports collection
+    match /reports/{reportId} {
+      allow read: if isAdmin() || isRecruiter();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Analytics collection
+    match /analytics/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // OTP Verification collection (for email verification during signup)
+    // Allows unauthenticated access since user doesn't exist yet
+    match /otpVerification/{pendingId} {
+      // Allow create for signup (before user is authenticated)
+      allow create: if true;
+      // Allow read/update for OTP verification and resend
+      allow read, update: if true;
+      // Allow delete after verification or expiry
+      allow delete: if true;
+    }
+
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

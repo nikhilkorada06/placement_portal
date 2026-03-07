@@ -1,0 +1,77 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function isValidFileSize(maxSizeMB) {
+      return request.resource.size < maxSizeMB * 1024 * 1024;
+    }
+    
+    function isValidImageType() {
+      return request.resource.contentType.matches('image/.*');
+    }
+    
+    function isValidDocumentType() {
+      return request.resource.contentType.matches('application/pdf') ||
+             request.resource.contentType.matches('application/msword') ||
+             request.resource.contentType.matches('application/vnd.openxmlformats-officedocument.*');
+    }
+
+    // Resumes
+    match /resumes/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && 
+                    isOwner(userId) && 
+                    isValidDocumentType() && 
+                    isValidFileSize(5);
+      allow delete: if isSignedIn() && isOwner(userId);
+    }
+
+    // Profile Pictures
+    match /profile-pictures/{fileName} {
+      allow read: if true; // Public read
+      allow write: if isSignedIn() && 
+                    isValidImageType() && 
+                    isValidFileSize(5);
+      allow delete: if isSignedIn();
+    }
+
+    // Company Logos
+    match /company-logos/{fileName} {
+      allow read: if true; // Public read
+      allow write: if isSignedIn() && 
+                    isValidImageType() && 
+                    isValidFileSize(5);
+      allow delete: if isSignedIn();
+    }
+
+    // Job Attachments
+    match /job-attachments/{jobId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidFileSize(5);
+      allow delete: if isSignedIn();
+    }
+
+    // Certificates
+    match /certificates/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && 
+                    isOwner(userId) && 
+                    isValidFileSize(5);
+      allow delete: if isSignedIn() && isOwner(userId);
+    }
+
+    // Deny all other access
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
